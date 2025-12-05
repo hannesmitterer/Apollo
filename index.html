@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Apollo-Euystacio Interface - Ethical AI monitoring dashboard with real-time telemetry and audit capabilities">
+    <meta name="theme-color" content="#030308">
     <title>Apollo-Euystacio Interface v2.0 | Safe Implementation</title>
     
     <!-- Tailwind CSS -->
@@ -61,6 +63,33 @@
             color: #E0E6ED;
             font-family: 'Rajdhani', sans-serif;
             overflow-x: hidden;
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: #030308;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 0.5s ease-out;
+        }
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(212, 175, 55, 0.2);
+            border-top-color: #D4AF37;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         /* Glassmorphism Panels */
@@ -122,6 +151,11 @@
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
+    
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" role="status" aria-label="Loading">
+        <div class="loading-spinner"></div>
+    </div>
 
     <!-- NAVIGATION / STATUS HEADER -->
     <nav class="w-full p-6 border-b border-white/10 bg-void/80 backdrop-blur-md fixed top-0 z-50">
@@ -297,237 +331,330 @@
            - Logs: Auto-scrolling array simulation.
         */
 
-        // --- 1. APOLLO CORE VISUALIZATION (CANVAS) ---
-        const canvas = document.getElementById('apolloCore');
-        const ctx = canvas.getContext('2d');
-        
-        // Set resolution
-        canvas.width = canvas.offsetWidth;
-        canvas.height = canvas.offsetHeight;
+        // Application state for cleanup and stability
+        const AppState = {
+            animationFrameId: null,
+            intervals: [],
+            initialized: false
+        };
 
-        // Tetrahedron Vertices (4 nodes)
-        let nodes = [
-            {x: 0, y: -100, z: 0},    // Top
-            {x: -80, y: 50, z: -50},  // Base Left
-            {x: 80, y: 50, z: -50},   // Base Right
-            {x: 0, y: 50, z: 80}      // Base Front
-        ];
-
-        let angle = 0;
-
-        function project(p, width, height) {
-            // Simple perspective projection
-            const fov = 300;
-            const scale = fov / (fov + p.z + 200);
-            const x2d = p.x * scale + width / 2;
-            const y2d = p.y * scale + height / 2;
-            return { x: x2d, y: y2d, scale: scale };
-        }
-
-        function rotateY(p, theta) {
-            const cos = Math.cos(theta);
-            const sin = Math.sin(theta);
-            return {
-                x: p.x * cos - p.z * sin,
-                y: p.y,
-                z: p.x * sin + p.z * cos
-            };
-        }
-        
-        function rotateX(p, theta) {
-            const cos = Math.cos(theta);
-            const sin = Math.sin(theta);
-            return {
-                x: p.x,
-                y: p.y * cos - p.z * sin,
-                z: p.y * sin + p.z * cos
-            };
-        }
-
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // --- INITIALIZATION ---
+        function initializeApp() {
+            if (AppState.initialized) return;
             
-            // Update rotation
-            angle += 0.005;
-
-            const projectedNodes = nodes.map(node => {
-                let rot = rotateY(node, angle);
-                rot = rotateX(rot, angle * 0.5);
-                return project(rot, canvas.width, canvas.height);
-            });
-
-            // Draw Connections (Synapse Lines)
-            ctx.lineWidth = 1;
-            ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)'; // Truth Cyan
-
-            // Connect every node to every other node (Tetrahedron topology)
-            for (let i = 0; i < projectedNodes.length; i++) {
-                for (let j = i + 1; j < projectedNodes.length; j++) {
-                    ctx.beginPath();
-                    ctx.moveTo(projectedNodes[i].x, projectedNodes[i].y);
-                    ctx.lineTo(projectedNodes[j].x, projectedNodes[j].y);
-                    ctx.stroke();
-                    
-                    // Add "Pulse" packet travelling
-                    const time = Date.now() * 0.002;
-                    const packetPos = (time % 1); // 0 to 1
-                    const px = projectedNodes[i].x + (projectedNodes[j].x - projectedNodes[i].x) * packetPos;
-                    const py = projectedNodes[i].y + (projectedNodes[j].y - projectedNodes[i].y) * packetPos;
-                    
-                    ctx.fillStyle = '#D4AF37'; // Gold
-                    ctx.beginPath();
-                    ctx.arc(px, py, 2, 0, Math.PI * 2);
-                    ctx.fill();
+            try {
+                initializeCanvas();
+                initializeChart();
+                initializeAuditLog();
+                AppState.initialized = true;
+                
+                // Hide loading overlay after initialization
+                const overlay = document.getElementById('loadingOverlay');
+                if (overlay) {
+                    overlay.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('Failed to initialize Apollo interface:', error);
+                // Still hide the overlay to show any partial content
+                const overlay = document.getElementById('loadingOverlay');
+                if (overlay) {
+                    overlay.classList.add('hidden');
                 }
             }
-
-            // Draw Nodes
-            projectedNodes.forEach((p, i) => {
-                // Glow
-                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 15 * p.scale);
-                gradient.addColorStop(0, 'rgba(212, 175, 55, 1)');
-                gradient.addColorStop(1, 'rgba(212, 175, 55, 0)');
-                ctx.fillStyle = gradient;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 15 * p.scale, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Core
-                ctx.fillStyle = '#fff';
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 3 * p.scale, 0, Math.PI * 2);
-                ctx.fill();
-            });
-
-            requestAnimationFrame(draw);
         }
 
-        draw(); // Start animation
+        // --- 1. APOLLO CORE VISUALIZATION (CANVAS) ---
+        function initializeCanvas() {
+            const canvas = document.getElementById('apolloCore');
+            if (!canvas) {
+                console.warn('Apollo Core canvas not found');
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.warn('Canvas 2D context not available');
+                return;
+            }
+            
+            // Set resolution with proper device pixel ratio support
+            function resizeCanvas() {
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.scale(dpr, dpr);
+            }
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Tetrahedron Vertices (4 nodes)
+            const nodes = [
+                {x: 0, y: -100, z: 0},    // Top
+                {x: -80, y: 50, z: -50},  // Base Left
+                {x: 80, y: 50, z: -50},   // Base Right
+                {x: 0, y: 50, z: 80}      // Base Front
+            ];
+
+            let angle = 0;
+
+            function project(p, width, height) {
+                // Simple perspective projection
+                const fov = 300;
+                const scale = fov / (fov + p.z + 200);
+                const x2d = p.x * scale + width / 2;
+                const y2d = p.y * scale + height / 2;
+                return { x: x2d, y: y2d, scale: scale };
+            }
+
+            function rotateY(p, theta) {
+                const cos = Math.cos(theta);
+                const sin = Math.sin(theta);
+                return {
+                    x: p.x * cos - p.z * sin,
+                    y: p.y,
+                    z: p.x * sin + p.z * cos
+                };
+            }
+            
+            function rotateX(p, theta) {
+                const cos = Math.cos(theta);
+                const sin = Math.sin(theta);
+                return {
+                    x: p.x,
+                    y: p.y * cos - p.z * sin,
+                    z: p.y * sin + p.z * cos
+                };
+            }
+
+            function draw() {
+                const rect = canvas.getBoundingClientRect();
+                ctx.clearRect(0, 0, rect.width, rect.height);
+                
+                // Update rotation
+                angle += 0.005;
+
+                const projectedNodes = nodes.map(node => {
+                    let rot = rotateY(node, angle);
+                    rot = rotateX(rot, angle * 0.5);
+                    return project(rot, rect.width, rect.height);
+                });
+
+                // Draw Connections (Synapse Lines)
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)'; // Truth Cyan
+
+                // Connect every node to every other node (Tetrahedron topology)
+                for (let i = 0; i < projectedNodes.length; i++) {
+                    for (let j = i + 1; j < projectedNodes.length; j++) {
+                        ctx.beginPath();
+                        ctx.moveTo(projectedNodes[i].x, projectedNodes[i].y);
+                        ctx.lineTo(projectedNodes[j].x, projectedNodes[j].y);
+                        ctx.stroke();
+                        
+                        // Add "Pulse" packet travelling
+                        const time = Date.now() * 0.002;
+                        const packetPos = (time % 1); // 0 to 1
+                        const px = projectedNodes[i].x + (projectedNodes[j].x - projectedNodes[i].x) * packetPos;
+                        const py = projectedNodes[i].y + (projectedNodes[j].y - projectedNodes[i].y) * packetPos;
+                        
+                        ctx.fillStyle = '#D4AF37'; // Gold
+                        ctx.beginPath();
+                        ctx.arc(px, py, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                // Draw Nodes
+                projectedNodes.forEach((p, i) => {
+                    // Glow
+                    const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 15 * p.scale);
+                    gradient.addColorStop(0, 'rgba(212, 175, 55, 1)');
+                    gradient.addColorStop(1, 'rgba(212, 175, 55, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 15 * p.scale, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Core
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3 * p.scale, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                AppState.animationFrameId = requestAnimationFrame(draw);
+            }
+
+            draw(); // Start animation
+        }
 
         // --- 2. CHART.JS TELEMETRY ---
-        const chartCtx = document.getElementById('telemetryChart').getContext('2d');
-        
-        // Initial Data Points
-        const initialLabels = Array.from({length: 20}, (_, i) => i);
-        const csiData = Array(20).fill(0.939);
-        const tsvData = Array(20).fill(0.049);
+        function initializeChart() {
+            const chartCanvas = document.getElementById('telemetryChart');
+            if (!chartCanvas) {
+                console.warn('Telemetry chart canvas not found');
+                return;
+            }
+            
+            const chartCtx = chartCanvas.getContext('2d');
+            if (!chartCtx) {
+                console.warn('Chart 2D context not available');
+                return;
+            }
+            
+            // Initial Data Points
+            const initialLabels = Array.from({length: 20}, (_, i) => i);
+            const csiData = Array(20).fill(0.939);
+            const tsvData = Array(20).fill(0.049);
 
-        const telemetryChart = new Chart(chartCtx, {
-            type: 'line',
-            data: {
-                labels: initialLabels,
-                datasets: [
-                    {
-                        label: 'G-CSI (Equity)',
-                        data: csiData,
-                        borderColor: '#00F0FF', // Cyan
-                        backgroundColor: 'rgba(0, 240, 255, 0.1)',
-                        tension: 0.4,
-                        borderWidth: 2,
-                        fill: true,
-                        pointRadius: 0
-                    },
-                    {
-                        label: 'N-TSV (Volatility)',
-                        data: tsvData,
-                        borderColor: '#FF2A6D', // Red
-                        borderWidth: 1,
-                        borderDash: [5, 5],
-                        tension: 0.4,
-                        pointRadius: 0
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                plugins: {
-                    legend: { labels: { color: '#aaa' } }
+            const telemetryChart = new Chart(chartCtx, {
+                type: 'line',
+                data: {
+                    labels: initialLabels,
+                    datasets: [
+                        {
+                            label: 'G-CSI (Equity)',
+                            data: csiData,
+                            borderColor: '#00F0FF', // Cyan
+                            backgroundColor: 'rgba(0, 240, 255, 0.1)',
+                            tension: 0.4,
+                            borderWidth: 2,
+                            fill: true,
+                            pointRadius: 0
+                        },
+                        {
+                            label: 'N-TSV (Volatility)',
+                            data: tsvData,
+                            borderColor: '#FF2A6D', // Red
+                            borderWidth: 1,
+                            borderDash: [5, 5],
+                            tension: 0.4,
+                            pointRadius: 0
+                        }
+                    ]
                 },
-                scales: {
-                    y: { 
-                        min: 0, max: 1.1,
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#666' }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: { labels: { color: '#aaa' } }
                     },
-                    x: { display: false }
+                    scales: {
+                        y: { 
+                            min: 0, max: 1.1,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#666' }
+                        },
+                        x: { display: false }
+                    }
                 }
-            }
-        });
+            });
 
-        // Live Update Loop
-        setInterval(() => {
-            // Jitter logic
-            const jitterCSI = (Math.random() * 0.002 - 0.001);
-            const jitterTSV = (Math.random() * 0.004 - 0.002);
+            // Live Update Loop
+            const chartInterval = setInterval(() => {
+                // Jitter logic
+                const jitterCSI = (Math.random() * 0.002 - 0.001);
+                const jitterTSV = (Math.random() * 0.004 - 0.002);
+                
+                const lastCSI = telemetryChart.data.datasets[0].data.slice(-1)[0];
+                const lastTSV = telemetryChart.data.datasets[1].data.slice(-1)[0];
+
+                let newCSI = lastCSI + jitterCSI;
+                let newTSV = lastTSV + jitterTSV;
+
+                // Boundaries
+                if(newCSI > 0.99) newCSI = 0.99; if(newCSI < 0.90) newCSI = 0.90;
+                if(newTSV < 0.01) newTSV = 0.01; if(newTSV > 0.08) newTSV = 0.08;
+
+                // Push Data
+                telemetryChart.data.datasets[0].data.shift();
+                telemetryChart.data.datasets[0].data.push(newCSI);
+                telemetryChart.data.datasets[1].data.shift();
+                telemetryChart.data.datasets[1].data.push(newTSV);
+                
+                telemetryChart.update();
+
+                // Update HTML Text
+                const csiEl = document.getElementById('val-csi');
+                const tsvEl = document.getElementById('val-tsv');
+                const latEl = document.getElementById('val-lat');
+                
+                if (csiEl) csiEl.innerText = newCSI.toFixed(3);
+                if (tsvEl) tsvEl.innerText = newTSV.toFixed(3);
+                if (latEl) latEl.innerText = (2.55 + (Math.random()*0.1 - 0.05)).toFixed(2) + ' ms';
+
+            }, 1000);
             
-            const lastCSI = telemetryChart.data.datasets[0].data.slice(-1)[0];
-            const lastTSV = telemetryChart.data.datasets[1].data.slice(-1)[0];
-
-            let newCSI = lastCSI + jitterCSI;
-            let newTSV = lastTSV + jitterTSV;
-
-            // Boundaries
-            if(newCSI > 0.99) newCSI = 0.99; if(newCSI < 0.90) newCSI = 0.90;
-            if(newTSV < 0.01) newTSV = 0.01; if(newTSV > 0.08) newTSV = 0.08;
-
-            // Push Data
-            telemetryChart.data.datasets[0].data.shift();
-            telemetryChart.data.datasets[0].data.push(newCSI);
-            telemetryChart.data.datasets[1].data.shift();
-            telemetryChart.data.datasets[1].data.push(newTSV);
-            
-            telemetryChart.update();
-
-            // Update HTML Text
-            document.getElementById('val-csi').innerText = newCSI.toFixed(3);
-            document.getElementById('val-tsv').innerText = newTSV.toFixed(3);
-            document.getElementById('val-lat').innerText = (2.55 + (Math.random()*0.1 - 0.05)).toFixed(2) + ' ms';
-
-        }, 1000);
-
-
-        // --- 3. SAUL AUDIT LOG ---
-        const logContainer = document.getElementById('auditLog');
-        
-        const logMessages = [
-            "BLOCKCHAIN: Anchor #742x verified. Hash match.",
-            "APE-ENGINE: Self-Correction Cycle initiated. Delta +0.001.",
-            "ACCESS-GATE: Health-AI Interface Probe... SECURE.",
-            "GGI-AIC: RIW Scan complete. Latency 2.55ms. OK.",
-            "LEDGER: Witness Protocol confirmed by Gemini.",
-            "LEDGER: Witness Protocol confirmed by Claude.",
-            "LEDGER: Witness Protocol confirmed by Copilot.",
-            "SYSTEM: OLF Core Check... PASS."
-        ];
-
-        // Pre-fill
-        logMessages.forEach(msg => addLogEntry(msg));
-
-        function addLogEntry(text = null) {
-            const msg = text || logMessages[Math.floor(Math.random() * logMessages.length)];
-            const now = new Date().toISOString().replace('T', ' ').split('.')[0];
-            
-            const entry = document.createElement('div');
-            entry.className = "border-l-2 border-cyan pl-2 py-1 opacity-80 hover:opacity-100 transition-opacity";
-            
-            // Color coding
-            let colorClass = "text-cyan";
-            if(msg.includes("APE-ENGINE")) colorClass = "text-gold";
-            if(msg.includes("BLOCKCHAIN")) colorClass = "text-green-400";
-
-            entry.innerHTML = `<span class="text-gray-500 text-[10px] mr-2">[${now}]</span><span class="${colorClass}">${msg}</span>`;
-            
-            logContainer.insertBefore(entry, logContainer.firstChild);
-            
-            if(logContainer.children.length > 50) {
-                logContainer.removeChild(logContainer.lastChild);
-            }
+            AppState.intervals.push(chartInterval);
         }
 
-        // Add new log every 2.5 seconds
-        setInterval(() => addLogEntry(), 2500);
+        // --- 3. SAUL AUDIT LOG ---
+        function initializeAuditLog() {
+            const logContainer = document.getElementById('auditLog');
+            if (!logContainer) {
+                console.warn('Audit log container not found');
+                return;
+            }
+            
+            const logMessages = [
+                "BLOCKCHAIN: Anchor #742x verified. Hash match.",
+                "APE-ENGINE: Self-Correction Cycle initiated. Delta +0.001.",
+                "ACCESS-GATE: Health-AI Interface Probe... SECURE.",
+                "GGI-AIC: RIW Scan complete. Latency 2.55ms. OK.",
+                "LEDGER: Witness Protocol confirmed by Gemini.",
+                "LEDGER: Witness Protocol confirmed by Claude.",
+                "LEDGER: Witness Protocol confirmed by Copilot.",
+                "SYSTEM: OLF Core Check... PASS."
+            ];
+
+            function addLogEntry(text = null) {
+                const msg = text || logMessages[Math.floor(Math.random() * logMessages.length)];
+                const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+                
+                const entry = document.createElement('div');
+                entry.className = "border-l-2 border-cyan pl-2 py-1 opacity-80 hover:opacity-100 transition-opacity";
+                
+                // Color coding
+                let colorClass = "text-cyan";
+                if(msg.includes("APE-ENGINE")) colorClass = "text-gold";
+                if(msg.includes("BLOCKCHAIN")) colorClass = "text-green-400";
+
+                entry.innerHTML = `<span class="text-gray-500 text-[10px] mr-2">[${now}]</span><span class="${colorClass}">${msg}</span>`;
+                
+                logContainer.insertBefore(entry, logContainer.firstChild);
+                
+                if(logContainer.children.length > 50) {
+                    logContainer.removeChild(logContainer.lastChild);
+                }
+            }
+
+            // Pre-fill
+            logMessages.forEach(msg => addLogEntry(msg));
+
+            // Add new log every 2.5 seconds
+            const logInterval = setInterval(() => addLogEntry(), 2500);
+            AppState.intervals.push(logInterval);
+        }
+
+        // --- CLEANUP FUNCTION (for future use) ---
+        function cleanupApp() {
+            if (AppState.animationFrameId) {
+                cancelAnimationFrame(AppState.animationFrameId);
+            }
+            AppState.intervals.forEach(interval => clearInterval(interval));
+            AppState.intervals = [];
+            AppState.initialized = false;
+        }
+
+        // Initialize when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+            initializeApp();
+        }
 
     </script>
 </body>
